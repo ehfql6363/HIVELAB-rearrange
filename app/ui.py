@@ -129,14 +129,6 @@ class AppUI:
         frm = ttk.Frame(self._content, padding=pad)
         frm.pack(fill="both", expand=True)
 
-        # Input row (optional, not used by rearrange job)
-        row1 = ttk.Frame(frm)
-        row1.pack(fill="x")
-        ttk.Label(row1, text=_("Input folder")).pack(side="left")
-        self.input_entry = ttk.Entry(row1, textvariable=self.input_dir_var, width=60)
-        self.input_entry.pack(side="left", padx=6, fill="x", expand=True)
-        ttk.Button(row1, text=_("Browse..."), command=self._browse_input).pack(side="left")
-
         # Job row
         row2 = ttk.Frame(frm)
         row2.pack(fill="x", pady=(8, 4))
@@ -181,11 +173,6 @@ class AppUI:
         self.log.pack(side="left", fill="both", expand=True)
         log_scroll.pack(side="right", fill="y")
         self._bind_text_scroll(self.log)
-
-    def _browse_input(self):
-        chosen = filedialog.askdirectory(title=_("Choose input folder"))
-        if chosen:
-            self.input_dir_var.set(chosen)
 
     # Params Panel
     def _build_params_panel(self):
@@ -415,26 +402,17 @@ class AppUI:
     def _start(self):
         if self.running:
             return
-        inp = self.input_dir_var.get().strip()
-        if inp and not Path(inp).exists():
-            self._log(_("Input folder does not exist."))
-            return
 
         job_name = self.job_combo.get().strip()
         if not job_name:
             self._log(_("Please choose a job."))
             return
 
-        if inp:
-            self.settings["last_input_dir"] = inp
-            save_settings(self.settings)
-
         self._set_running(True)
         self.progress_var.set(0)
         self.status_var.set(_("Running..."))
 
         context = {
-            "input_dir": inp,
             "settings": self.settings
         }
 
