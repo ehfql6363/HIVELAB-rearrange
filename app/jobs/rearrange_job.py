@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Any, List, Optional, Tuple
 from threading import Event
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except Exception:
+    ZoneInfo = None
 
 ACCOUNT_NUM_RE = re.compile(r"(\d+)")
 POST_NUM_RE = re.compile(r"^\s*(\d+)\.")
@@ -29,6 +34,21 @@ SLOT_RANGES = {
     "ㄷ": [7, 8, 9],      # B(1,2,3) -> slots 7..9
     "ㄹ": [10, 11, 12],   # B(4,5,6) -> slots 10..12
 }
+
+def _today_kor_daychar(tz_name: str = "Asia/Seoul") -> str:
+    """
+    오늘의 요일을 한글 한 글자(월~일)로 반환.
+    KST(Asia/Seoul) 우선, 실패 시 로컬 시간 사용.
+    """
+    weekdays = ["월", "화", "수", "목", "금", "토", "일"]  # Monday=0
+    try:
+        if ZoneInfo:
+            idx = datetime.now(ZoneInfo(tz_name)).weekday()
+        else:
+            idx = datetime.now().weekday()
+    except Exception:
+        idx = datetime.now().weekday()
+    return weekdays[idx]
 
 @dataclass
 class TargetSlot:
@@ -222,6 +242,13 @@ class RearrangeJob:
             src = slot_to_src.get(slot)
             plans.append(f"slot {slot:2d}  <-  {src if src else '(missing)'}")
 
+        # 오늘 요일 기반 day 라벨 만들기
+        today_char = _today_kor_daychar()
+        day_label_A = f"{today_char}-A"  # 기존 '월' 자리에 사용
+        day_label_B = f"{today_char}-B"  # 기존 '화' 자리에 사용
+
+        plans.append(f"DEST DAY LABELS: {day_label_A} (slots 1–6), {day_label_B} (slots 7–12)")
+
         def get_dest_parent(slot_idx: int, label: str, day: str) -> Path:
             ts = targets[slot_idx - 1]
             if ts.existing_path:
@@ -284,22 +311,22 @@ class RearrangeJob:
 
         # Iterate labels and days
         for label in ["유미", "상근"]:
-            # 월: slots 1..6
-            day = "월"
-            day_order = SEQ[day][label]
+            # A세트(기존 '월'): slots 1..6
+            day_key = "월"  # 시퀀스 룰은 그대로 사용
+            day_order = SEQ[day_key][label]
             for slot in range(1, 7):
                 if cancel_event.is_set(): return
                 src = slot_to_src.get(slot)
-                dest_parent = get_dest_parent(slot, label, day)
+                dest_parent = get_dest_parent(slot, label, day_label_A)  # ✅ 경로는 '오늘요일-A'
                 copy_account_posts(src, dest_parent, day_order, dry_run)
 
-            # 화: slots 7..12
-            day = "화"
-            day_order = SEQ[day][label]
+            # B세트(기존 '화'): slots 7..12
+            day_key = "화"  # 시퀀스 룰은 그대로 사용
+            day_order = SEQ[day_key][label]
             for slot in range(7, 13):
                 if cancel_event.is_set(): return
                 src = slot_to_src.get(slot)
-                dest_parent = get_dest_parent(slot, label, day)
+                dest_parent = get_dest_parent(slot, label, day_label_B)  # ✅ 경로는 '오늘요일-B'
                 copy_account_posts(src, dest_parent, day_order, dry_run)
 
         # Emit logs
