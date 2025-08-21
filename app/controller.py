@@ -1,50 +1,51 @@
+# app/controller.py
+from __future__ import annotations
 from threading import Event
-from typing import Callable, Dict, Any
+from typing import Callable, Dict, Any, List, Type
 
-from .jobs import load_jobs
+# 잡 등록: 현재는 Rearrange 하나만
+from .jobs.rearrange_job import RearrangeJob
+
+JobType = Type
 
 class AppController:
-    """
-    Coordinates UI <-> Job execution.
-    """
-    def __init__(self, settings):
+    def __init__(self, settings: Dict[str, Any]):
         self.settings = settings
-        self.jobs = load_jobs()
-        self.current_cancel_event: Event | None = None
+        # ✅ 꼭 초기화하세요
+        self.jobs: List[JobType] = [RearrangeJob]
+        self._cancel_event: Event | None = None
 
-    def list_job_names(self):
-        return [job_cls.meta()['name'] for job_cls in self.jobs]
+    def list_job_names(self) -> List[str]:
+        return [job_cls.meta()["name"] for job_cls in self.jobs]
 
     def get_job_by_name(self, name: str):
         for job_cls in self.jobs:
-            if job_cls.meta()['name'] == name:
+            if job_cls.meta().get("name") == name:
                 return job_cls
-        raise KeyError(f"Job '{name}' not found")
+        raise KeyError(f"Job not found: {name}")
 
-    def run_job(self, job_name: str, context: Dict[str, Any],
-                progress_cb: Callable[[int, str], None],
-                done_cb: Callable[[bool, str], None]):
-        job_cls = self.get_job_by_name(job_name)
-        job = job_cls()
-        cancel_event = Event()
-        self.current_cancel_event = cancel_event
+    def run_job(
+        self,
+        name: str,
+        context: Dict[str, Any],
+        progress_cb: Callable[[int, str], None],
+        done_cb: Callable[[bool, str], None],
+    ):
+        job_cls = self.get_job_by_name(name)
+        self._cancel_event = Event()
 
-        def _run():
-            ok = False
-            err_msg = ""
+        def _target():
             try:
-                job.run(context=context, progress_cb=progress_cb, cancel_event=cancel_event)
-                ok = True
+                job = job_cls()
+                job.run(context, progress_cb, self._cancel_event)
+                done_cb(True, "")
             except Exception as e:
-                err_msg = str(e)
-            finally:
-                self.current_cancel_event = None
-                done_cb(ok, err_msg)
+                done_cb(False, str(e))
 
-        return _run  # caller should submit to a thread
+        return _target
 
-    def cancel(self):
-        if self.current_cancel_event and not self.current_cancel_event.is_set():
-            self.current_cancel_event.set()
+    def cancel(self) -> bool:
+        if self._cancel_event and not self._cancel_event.is_set():
+            self._cancel_event.set()
             return True
         return False
