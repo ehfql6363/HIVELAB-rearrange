@@ -11,6 +11,7 @@ try:
     from zoneinfo import ZoneInfo  # Python 3.9+
 except Exception:
     ZoneInfo = None
+from ..i18n_loader import _
 
 ACCOUNT_NUM_RE = re.compile(r"(\d+)")
 POST_NUM_RE = re.compile(r"^\s*(\d+)\.")
@@ -230,12 +231,27 @@ class RearrangeJob:
         plans: List[str] = []
 
         # ---------- Mapping summary (always log) ----------
-        plans.append(f"Permutation mode = {perm_mode}" + (f" (seed={rand_seed})" if perm_mode == "random" else ""))
-        plans.append("==== SUBGROUP PERMUTATIONS (선택/랜덤 결과) ====")
+        # 드라이런 헤더 (맨 위에 보이게 하고 싶으면 insert(0, ...) 써도 됩니다)
+        plans.append(_("==== DRY RUN PLAN (no changes made) ====")) if dry_run else None
+
+        # 모드/시드
+        plans.append(
+            _("Permutation mode = ") + perm_mode
+            + (_(" (seed=") + str(rand_seed) + ")" if perm_mode == "random" else "")
+        )
+
+        # 소그룹 순열 헤더
+        plans.append(_("==== SUBGROUP PERMUTATIONS (selected/random result) ===="))
         plans.append(f"ㄱ (A1-3): {'-'.join(map(str, chosen_perms['ㄱ']))}  -> slots {SLOT_RANGES['ㄱ']}")
         plans.append(f"ㄴ (A4-6): {'-'.join(map(str, chosen_perms['ㄴ']))}  -> slots {SLOT_RANGES['ㄴ']}")
         plans.append(f"ㄷ (B1-3): {'-'.join(map(str, chosen_perms['ㄷ']))}  -> slots {SLOT_RANGES['ㄷ']}")
         plans.append(f"ㄹ (B4-6): {'-'.join(map(str, chosen_perms['ㄹ']))}  -> slots {SLOT_RANGES['ㄹ']}")
+
+        # 슬롯 매핑 헤더
+        plans.append(_("==== SLOT → SOURCE ACCOUNT ===="))
+        for slot in range(1, 13):
+            src = slot_to_src.get(slot)
+            plans.append(f"slot {slot:2d}  <-  {src if src else '(missing)'}")
 
         plans.append("==== SLOT → SOURCE ACCOUNT ====")
         for slot in range(1, 13):

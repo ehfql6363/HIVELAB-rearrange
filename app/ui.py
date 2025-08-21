@@ -9,15 +9,18 @@ import os, sys, subprocess
 
 from .controller import AppController
 from .settings import load_settings, save_settings
-from .i18n_loader import _
+from .i18n_loader import _, set_locale
 
 class AppUI:
     def __init__(self, root: Tk):
         self.root = root
+        self._last_target_root = ""
         self.settings = load_settings()
+        lang = self.settings.get("locale", "ko")
+        set_locale(lang)
         self.controller = AppController(self.settings)
 
-        self.root.title("HIVELAB Rearrange")
+        self.root.title(_("HIVELAB Rearrange"))
         w = self.settings.get("window", {}).get("width", 1000)
         h = self.settings.get("window", {}).get("height", 720)
         self.root.geometry(f"{w}x{h}")
@@ -98,6 +101,29 @@ class AppUI:
         widget.bind_all("<Button-4>", self._on_mousewheel_linux)
         widget.bind_all("<Button-5>", self._on_mousewheel_linux)
 
+    def _add_tooltip(self, widget: tk.Widget, text: str):
+        tip = {"win": None}
+
+        def show(_e=None):
+            if tip["win"] is not None:
+                return
+            x = widget.winfo_rootx() + 16
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+            win = tk.Toplevel(widget)
+            win.wm_overrideredirect(True)
+            win.wm_geometry(f"+{x}+{y}")
+            ttk.Label(win, text=text, padding=8, relief="solid", borderwidth=1).pack()
+            tip["win"] = win
+
+        def hide(_e=None):
+            if tip["win"] is not None:
+                tip["win"].destroy()
+                tip["win"] = None
+
+        widget.bind("<Enter>", show)
+        widget.bind("<Leave>", hide)
+        widget.bind("<FocusOut>", hide)
+
     def _bind_text_scroll(self, text_widget: tk.Text):
         """마우스 포인터가 텍스트 위에 있을 때는 텍스트만 스크롤하게 한다."""
 
@@ -148,8 +174,9 @@ class AppUI:
         # 로그 지우기 / 완료 폴더 열기
         self.clear_log_btn = ttk.Button(row3, text=_("Clear log"), command=self._clear_log)
         self.clear_log_btn.pack(side="left", padx=(12, 0))
-        self.open_results_btn = ttk.Button(row3, text=_("Open results..."), command=self._open_results, state=DISABLED)
-        self.open_results_btn.pack(side="left", padx=(6, 0))
+        self.open_target_btn = ttk.Button(row3, text=_("Open target root..."), command=self._open_target_root,
+                                          state=DISABLED)
+        self.open_target_btn.pack(side="left", padx=(6, 0))
 
         # Progress
         row4 = ttk.Frame(frm)
@@ -224,7 +251,20 @@ class AppUI:
             # Dry-run
             row += 1
             self.params_widgets["dry_run"] = tk.BooleanVar(value=True)
-            ttk.Checkbutton(self.params_frame, text=_("Dry-run (no changes)"), variable=self.params_widgets["dry_run"]).grid(row=row, column=0, sticky="w", **pad)
+            dry_row = ttk.Frame(self.params_frame)
+            dry_row.grid(row=row, column=0, columnspan=3, sticky="w", **pad)
+
+            cb = ttk.Checkbutton(dry_row, text=_("Dry-run (no changes)"),
+                                 variable=self.params_widgets["dry_run"])
+            cb.pack(side="left")
+
+            info = ttk.Label(dry_row, text="(?)")
+            info.pack(side="left", padx=(6, 0))
+
+            # 툴팁 연결(체크박스/아이콘 둘 다)
+            tip_text = _("No files will be copied or created; only a plan is logged.")
+            self._add_tooltip(cb, tip_text)
+            self._add_tooltip(info, tip_text)
 
             # ---- NEW: permutation controls ----
             row += 1
@@ -335,6 +375,13 @@ class AppUI:
                 entry.grid(row=row, column=2, sticky="ew", **pad)
                 ttk.Button(self.params_frame, text=_("Browse..."), command=lambda v=path_var: self._browse_to(v)).grid(row=row, column=3, **pad)
 
+                def _toggle_open_btn(*_):
+                    v = (self.params_widgets["target_root"].get() or "").strip()
+                    self.open_target_btn.config(state=(NORMAL if v else DISABLED))
+
+                self.params_widgets["target_root"].trace_add("write", _toggle_open_btn)
+                _toggle_open_btn()
+
             for c in range(4):
                 self.params_frame.grid_columnconfigure(c, weight=1)
         else:
@@ -367,17 +414,6 @@ class AppUI:
                             self._log(_("Error: ") + str(err))
                             self.status_var.set(_("Failed"))
                         self._set_running(False)
-
-                        # ✅ 잡이 남긴 결과 폴더 경로 수집
-                        result_dirs = getattr(self, "_last_context", {}).get("_result_dirs", [])
-                        # 컨텍스트에서 꺼낸 후 정리
-                        getattr(self, "_last_context", {}).pop("_result_dirs", None)
-                        self._last_result_dirs = list(dict.fromkeys(result_dirs))  # 중복 제거
-                        # 드라이런이거나 결과가 없으면 비활성, 있으면 활성
-                        if self._last_result_dirs:
-                            self.open_results_btn.config(state=NORMAL)
-                        else:
-                            self.open_results_btn.config(state=DISABLED)
 
             except Exception:
                 pass
@@ -445,14 +481,16 @@ class AppUI:
             self.settings["last_targets"] = params.get("targets", [])
             save_settings(self.settings)
 
+            self._last_target_root = params.get("target_root", "")
+            self.open_target_btn.config(state=(NORMAL if self._last_target_root else DISABLED))
+
         def progress_cb(pct: int, msg: str):
             self.ui_queue.put(("progress", {"pct": pct, "msg": msg}))
 
         def done_cb(ok: bool, err: str):
             self.ui_queue.put(("done", {"ok": ok, "err": err}))
 
-        self._last_result_dirs = []
-        self.open_results_btn.config(state=DISABLED)
+        self.open_target_btn.config(state=(NORMAL if self._last_target_root else DISABLED))
 
         self._last_context = context
         target = self.controller.run_job(job_name, context, progress_cb, done_cb)
@@ -511,6 +549,21 @@ class AppUI:
             self._open_in_explorer(Path(paths[sel[0]]))
 
         ttk.Button(btn_frame, text=_("Open"), command=_open_selected).pack(side="right")
+
+    def _open_target_root(self):
+        # UI에 값이 있으면 그걸 우선 사용, 없으면 저장된 최근 값 사용
+        path_str = ""
+        trg_var = self.params_widgets.get("target_root")
+        if trg_var:
+            path_str = (trg_var.get() or "").strip()
+        if not path_str:
+            path_str = (self.settings.get("last_target_root") or "").strip()
+
+        if not path_str:
+            messagebox.showinfo(_("Open target root"), _("Please set Target root folder first."))
+            return
+
+        self._open_in_explorer(Path(path_str))
 
 
 def run():
