@@ -2,7 +2,7 @@ from __future__ import annotations
 import queue
 import threading
 from pathlib import Path
-from tkinter import Tk, ttk, filedialog, StringVar, IntVar, END, DISABLED, NORMAL
+from tkinter import Tk, ttk, filedialog, StringVar, IntVar, END, DISABLED, NORMAL, colorchooser
 from tkinter import messagebox
 import tkinter as tk
 import os, sys, subprocess
@@ -248,6 +248,13 @@ class AppUI:
             ttk.Entry(self.params_frame, textvariable=self.params_widgets["target_root"], width=60).grid(row=row, column=1, sticky="ew", **pad)
             ttk.Button(self.params_frame, text=_("Browse..."), command=lambda: self._browse_to(self.params_widgets["target_root"])).grid(row=row, column=2, **pad)
 
+            def _toggle_open_btn(*_):
+                v = (self.params_widgets["target_root"].get() or "").strip()
+                self.open_target_btn.config(state=(NORMAL if v else DISABLED))
+
+            self.params_widgets["target_root"].trace_add("write", _toggle_open_btn)
+            _toggle_open_btn()
+
             # Dry-run
             row += 1
             self.params_widgets["dry_run"] = tk.BooleanVar(value=True)
@@ -266,26 +273,37 @@ class AppUI:
             self._add_tooltip(cb, tip_text)
             self._add_tooltip(info, tip_text)
 
-            # ---- NEW: permutation controls ----
+            # ---- NEW: permutation controls + watermark panel (side-by-side) ----
             row += 1
-            ttk.Separator(self.params_frame, orient="horizontal").grid(row=row, column=0, columnspan=4, sticky="ew", **pad)
+            ttk.Separator(self.params_frame, orient="horizontal").grid(row=row, column=0, columnspan=4, sticky="ew",
+                                                                       **pad)
 
             row += 1
-            ttk.Label(self.params_frame, text=_("Permutation mode")).grid(row=row, column=0, sticky="w", **pad)
+            container = ttk.Frame(self.params_frame)
+            container.grid(row=row, column=0, columnspan=4, sticky="nsew", **pad)
+            container.grid_columnconfigure(0, weight=1)  # 왼쪽(순열/시드/소그룹)
+            container.grid_columnconfigure(1, weight=1)  # 오른쪽(워터마크 옵션)
+
+            # ---------- LEFT: 순열 모드 / 시드 / 소그룹 순열 ----------
+            perm_left = ttk.Frame(container)
+            perm_left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+            r = 0
+            ttk.Label(perm_left, text=_("순열 모드")).grid(row=r, column=0, sticky="w", **pad)
             self.params_widgets["perm_mode"] = tk.StringVar(value="manual")
-            m1 = ttk.Radiobutton(self.params_frame, text=_("Manual"), value="manual", variable=self.params_widgets["perm_mode"])
-            m2 = ttk.Radiobutton(self.params_frame, text=_("Randomize (seed)"), value="random", variable=self.params_widgets["perm_mode"])
-            m1.grid(row=row, column=1, sticky="w", **pad)
-            m2.grid(row=row, column=2, sticky="w", **pad)
+            m1 = ttk.Radiobutton(perm_left, text=_("수동"), value="manual", variable=self.params_widgets["perm_mode"])
+            m2 = ttk.Radiobutton(perm_left, text=_("랜덤(시드)"), value="random", variable=self.params_widgets["perm_mode"])
+            m1.grid(row=r, column=1, sticky="w", **pad)
+            m2.grid(row=r, column=2, sticky="w", **pad)
 
-            row += 1
-            ttk.Label(self.params_frame, text=_("Seed")).grid(row=row, column=0, sticky="w", **pad)
+            r += 1
+            ttk.Label(perm_left, text=_("시드")).grid(row=r, column=0, sticky="w", **pad)
             self.params_widgets["rand_seed"] = tk.StringVar(value="")
-            seed_entry = ttk.Entry(self.params_frame, textvariable=self.params_widgets["rand_seed"], width=20)
-            seed_entry.grid(row=row, column=1, sticky="w", **pad)
+            seed_entry = ttk.Entry(perm_left, textvariable=self.params_widgets["rand_seed"], width=20)
+            seed_entry.grid(row=r, column=1, sticky="w", **pad)
 
-            row += 1
-            ttk.Label(self.params_frame, text=_("Subgroup permutations")).grid(row=row, column=0, sticky="w", **pad)
+            r += 1
+            ttk.Label(perm_left, text=_("소그룹 순열")).grid(row=r, column=0, sticky="w", **pad)
 
             def perm_strings(base):
                 b = list(base)
@@ -299,51 +317,126 @@ class AppUI:
                 ]
 
             # ㄱ: A(1,2,3)
-            row += 1
-            ttk.Label(self.params_frame, text=_("Group ㄱ (A1–3)")).grid(row=row, column=0, sticky="w", **pad)
+            r += 1
+            ttk.Label(perm_left, text=_("그룹 ㄱ (A1–3)")).grid(row=r, column=0, sticky="w", **pad)
             self.params_widgets["perm_k"] = tk.StringVar(value="3-1-2")
-            cb_k = ttk.Combobox(self.params_frame, textvariable=self.params_widgets["perm_k"], values=perm_strings([1,2,3]), state="readonly", width=12)
-            cb_k.grid(row=row, column=1, sticky="w", **pad)
+            cb_k = ttk.Combobox(perm_left, textvariable=self.params_widgets["perm_k"],
+                                values=perm_strings([1, 2, 3]), state="readonly", width=12)
+            cb_k.grid(row=r, column=1, sticky="w", **pad)
 
             # ㄴ: A(4,5,6)
-            row += 1
-            ttk.Label(self.params_frame, text=_("Group ㄴ (A4–6)")).grid(row=row, column=0, sticky="w", **pad)
+            r += 1
+            ttk.Label(perm_left, text=_("그룹 ㄴ (A4–6)")).grid(row=r, column=0, sticky="w", **pad)
             self.params_widgets["perm_n"] = tk.StringVar(value="6-4-5")
-            cb_n = ttk.Combobox(self.params_frame, textvariable=self.params_widgets["perm_n"], values=perm_strings([4,5,6]), state="readonly", width=12)
-            cb_n.grid(row=row, column=1, sticky="w", **pad)
+            cb_n = ttk.Combobox(perm_left, textvariable=self.params_widgets["perm_n"],
+                                values=perm_strings([4, 5, 6]), state="readonly", width=12)
+            cb_n.grid(row=r, column=1, sticky="w", **pad)
 
             # ㄷ: B(1,2,3)
-            row += 1
-            ttk.Label(self.params_frame, text=_("Group ㄷ (B1–3)")).grid(row=row, column=0, sticky="w", **pad)
+            r += 1
+            ttk.Label(perm_left, text=_("그룹 ㄷ (B1–3)")).grid(row=r, column=0, sticky="w", **pad)
             self.params_widgets["perm_d"] = tk.StringVar(value="2-3-1")
-            cb_d = ttk.Combobox(self.params_frame, textvariable=self.params_widgets["perm_d"], values=perm_strings([1,2,3]), state="readonly", width=12)
-            cb_d.grid(row=row, column=1, sticky="w", **pad)
+            cb_d = ttk.Combobox(perm_left, textvariable=self.params_widgets["perm_d"],
+                                values=perm_strings([1, 2, 3]), state="readonly", width=12)
+            cb_d.grid(row=r, column=1, sticky="w", **pad)
 
             # ㄹ: B(4,5,6)
-            row += 1
-            ttk.Label(self.params_frame, text=_("Group ㄹ (B4–6)")).grid(row=row, column=0, sticky="w", **pad)
+            r += 1
+            ttk.Label(perm_left, text=_("그룹 ㄹ (B4–6)")).grid(row=r, column=0, sticky="w", **pad)
             self.params_widgets["perm_r"] = tk.StringVar(value="5-6-4")
-            cb_r = ttk.Combobox(self.params_frame, textvariable=self.params_widgets["perm_r"], values=perm_strings([4,5,6]), state="readonly", width=12)
-            cb_r.grid(row=row, column=1, sticky="w", **pad)
+            cb_r = ttk.Combobox(perm_left, textvariable=self.params_widgets["perm_r"],
+                                values=perm_strings([4, 5, 6]), state="readonly", width=12)
+            cb_r.grid(row=r, column=1, sticky="w", **pad)
 
+            # 라디오와 시드 활성/비활성 연동
             self.params_widgets["perm_cbs"] = [cb_k, cb_n, cb_d, cb_r]
 
             def _update_perm_widgets_state(*_):
                 mode = self.params_widgets["perm_mode"].get()
                 if mode == "manual":
-                    # 수동: 콤보 ON, Seed OFF
                     for cb in self.params_widgets["perm_cbs"]:
                         cb.config(state="readonly")
                     seed_entry.config(state="disabled")
-                else:  # random
-                    # 랜덤: 콤보 OFF, Seed ON
+                else:
                     for cb in self.params_widgets["perm_cbs"]:
                         cb.config(state="disabled")
                     seed_entry.config(state="normal")
 
-            # 초기 상태 적용 + 모드 변경 시 자동 반응
             _update_perm_widgets_state()
             self.params_widgets["perm_mode"].trace_add("write", _update_perm_widgets_state)
+
+            # ---------- RIGHT: 워터마크 옵션 ----------
+            wm_right = ttk.LabelFrame(container, text=_("워터마크 옵션"))
+            wm_right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+            for c in range(4):
+                wm_right.grid_columnconfigure(c, weight=1)
+
+            # 0) 사용 여부
+            self.params_widgets["wm_enabled"] = tk.BooleanVar(value=False)
+            ttk.Checkbutton(wm_right, text=_("워터마크 적용"),
+                            variable=self.params_widgets["wm_enabled"]).grid(row=0, column=0, sticky="w", padx=6,
+                                                                             pady=4)
+
+            # 1) 텍스트
+            ttk.Label(wm_right, text=_("텍스트")).grid(row=1, column=0, sticky="w", padx=6, pady=4)
+            self.params_widgets["wm_text"] = tk.StringVar(value="")
+            ttk.Entry(wm_right, textvariable=self.params_widgets["wm_text"]).grid(row=1, column=1, columnspan=3,
+                                                                                  sticky="ew", padx=6, pady=4)
+
+            # 2) 폰트 파일
+            ttk.Label(wm_right, text=_("폰트 파일(.ttf/.otf)")).grid(row=2, column=0, sticky="w", padx=6, pady=4)
+            self.params_widgets["wm_font_path"] = tk.StringVar(value="")
+            ttk.Entry(wm_right, textvariable=self.params_widgets["wm_font_path"]).grid(row=2, column=1, columnspan=2,
+                                                                                       sticky="ew", padx=6, pady=4)
+            ttk.Button(wm_right, text=_("찾아보기..."),
+                       command=lambda: self._browse_font(self.params_widgets["wm_font_path"])
+                       ).grid(row=2, column=3, padx=6, pady=4)
+
+            # 3) 색/불투명/크기
+            ttk.Label(wm_right, text=_("색상")).grid(row=3, column=0, sticky="w", padx=6, pady=4)
+            self.params_widgets["wm_color"] = tk.StringVar(value="#FFFFFF")
+            color_swatch = tk.Label(wm_right, width=2, relief="solid", borderwidth=1,
+                                    background=self.params_widgets["wm_color"].get())
+            color_swatch.grid(row=3, column=1, sticky="w", padx=(6, 2), pady=4)
+            ttk.Button(wm_right, text=_("선택"),
+                       command=lambda: self._pick_color(self.params_widgets["wm_color"], color_swatch)
+                       ).grid(row=3, column=2, sticky="w", padx=6, pady=4)
+
+            ttk.Label(wm_right, text=_("불투명도(%)")).grid(row=3, column=3, sticky="e", padx=6, pady=4)
+            self.params_widgets["wm_opacity"] = tk.IntVar(value=50)
+            ttk.Spinbox(wm_right, from_=0, to=100, textvariable=self.params_widgets["wm_opacity"], width=5
+                        ).grid(row=3, column=4, sticky="w", padx=6, pady=4)
+
+            ttk.Label(wm_right, text=_("폰트 크기(px)")).grid(row=4, column=0, sticky="w", padx=6, pady=4)
+            self.params_widgets["wm_font_size"] = tk.IntVar(value=36)
+            ttk.Spinbox(wm_right, from_=6, to=512, textvariable=self.params_widgets["wm_font_size"], width=6
+                        ).grid(row=4, column=1, sticky="w", padx=6, pady=4)
+
+            # 4) 위치 + 오프셋
+            ttk.Label(wm_right, text=_("초기 위치")).grid(row=4, column=2, sticky="e", padx=6, pady=4)
+            self.params_widgets["wm_position"] = tk.StringVar(value="bottom-right")
+            ttk.Combobox(wm_right, state="readonly", width=12,
+                         textvariable=self.params_widgets["wm_position"],
+                         values=["top-left", "top-right", "bottom-left", "bottom-right", "center"]
+                         ).grid(row=4, column=3, sticky="w", padx=6, pady=4)
+
+            ttk.Label(wm_right, text=_("오프셋 X/Y(px)")).grid(row=5, column=0, sticky="w", padx=6, pady=4)
+            self.params_widgets["wm_offset_x"] = tk.IntVar(value=16)
+            self.params_widgets["wm_offset_y"] = tk.IntVar(value=16)
+            ttk.Spinbox(wm_right, from_=-2000, to=2000, textvariable=self.params_widgets["wm_offset_x"], width=7
+                        ).grid(row=5, column=1, sticky="w", padx=6, pady=4)
+            ttk.Spinbox(wm_right, from_=-2000, to=2000, textvariable=self.params_widgets["wm_offset_y"], width=7
+                        ).grid(row=5, column=2, sticky="w", padx=6, pady=4)
+
+            # 5) 외곽선
+            self.params_widgets["wm_outline"] = tk.BooleanVar(value=True)
+            ttk.Checkbutton(wm_right, text=_("외곽선"),
+                            variable=self.params_widgets["wm_outline"]).grid(row=6, column=0, sticky="w", padx=6,
+                                                                             pady=4)
+            ttk.Label(wm_right, text=_("두께(px)")).grid(row=6, column=1, sticky="w", padx=6, pady=4)
+            self.params_widgets["wm_outline_width"] = tk.IntVar(value=2)
+            ttk.Spinbox(wm_right, from_=1, to=20, textvariable=self.params_widgets["wm_outline_width"], width=5
+                        ).grid(row=6, column=1, sticky="w", padx=(70, 6), pady=4)
 
             # Targets header
             saved_targets = self.settings.get("last_targets", [])
@@ -374,13 +467,6 @@ class AppUI:
                 entry = ttk.Entry(self.params_frame, textvariable=path_var, width=45)
                 entry.grid(row=row, column=2, sticky="ew", **pad)
                 ttk.Button(self.params_frame, text=_("Browse..."), command=lambda v=path_var: self._browse_to(v)).grid(row=row, column=3, **pad)
-
-                def _toggle_open_btn(*_):
-                    v = (self.params_widgets["target_root"].get() or "").strip()
-                    self.open_target_btn.config(state=(NORMAL if v else DISABLED))
-
-                self.params_widgets["target_root"].trace_add("write", _toggle_open_btn)
-                _toggle_open_btn()
 
             for c in range(4):
                 self.params_frame.grid_columnconfigure(c, weight=1)
@@ -471,7 +557,21 @@ class AppUI:
                 "perm_d": self.params_widgets.get("perm_d").get() if self.params_widgets.get("perm_d") else "2-3-1",
                 "perm_r": self.params_widgets.get("perm_r").get() if self.params_widgets.get("perm_r") else "5-6-4",
                 "rand_seed": self.params_widgets.get("rand_seed").get() if self.params_widgets.get("rand_seed") else "",
-                "targets": []
+                "targets": [],
+                "watermark": {
+                    "enabled": bool(self.params_widgets.get("wm_enabled").get()),
+                    "text": self.params_widgets.get("wm_text").get(),
+                    "font_path": self.params_widgets.get("wm_font_path").get(),
+                    "color": self.params_widgets.get("wm_color").get(),  # "#RRGGBB"
+                    "opacity": int(self.params_widgets.get("wm_opacity").get()),  # 0~100
+                    "font_size": int(self.params_widgets.get("wm_font_size").get()),
+                    "position": self.params_widgets.get("wm_position").get(),  # preset
+                    "offset_x": int(self.params_widgets.get("wm_offset_x").get()),
+                    "offset_y": int(self.params_widgets.get("wm_offset_y").get()),
+                    "outline": bool(self.params_widgets.get("wm_outline").get()),
+                    "outline_width": int(self.params_widgets.get("wm_outline_width").get()),
+                },
+
             }
             for name_var, path_var in self.params_widgets.get("targets", []):
                 params["targets"].append({"name": name_var.get(), "path": path_var.get()})
@@ -564,6 +664,22 @@ class AppUI:
             return
 
         self._open_in_explorer(Path(path_str))
+
+    def _browse_font(self, var: tk.StringVar):
+        chosen = filedialog.askopenfilename(
+            title=_("폰트 파일 선택"),
+            filetypes=[("Font files", "*.ttf *.otf"), ("All files", "*.*")]
+        )
+        if chosen:
+            var.set(chosen)
+
+    def _pick_color(self, var: tk.StringVar, swatch: tk.Label):
+        initial = var.get() or "#000000"
+        color = colorchooser.askcolor(initialcolor=initial)[1]
+        if color:
+            var.set(color)
+            # 미니 미리보기
+            swatch.config(background=color)
 
 
 def run():
