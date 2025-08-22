@@ -368,29 +368,29 @@ class AppUI:
             # ---------- RIGHT: 워터마크 옵션 ----------
             wm_right = ttk.LabelFrame(container, text=_("워터마크 옵션"))
             wm_right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-            for c in range(4):
+            for c in range(5):  # ← column=4도 쓰니 5칸 잡기
                 wm_right.grid_columnconfigure(c, weight=1)
 
             # 0) 사용 여부
             self.params_widgets["wm_enabled"] = tk.BooleanVar(value=False)
-            ttk.Checkbutton(wm_right, text=_("워터마크 적용"),
-                            variable=self.params_widgets["wm_enabled"]).grid(row=0, column=0, sticky="w", padx=6,
-                                                                             pady=4)
+            wm_enabled_chk = ttk.Checkbutton(wm_right, text=_("워터마크 적용"),
+                                             variable=self.params_widgets["wm_enabled"])
+            wm_enabled_chk.grid(row=0, column=0, sticky="w", padx=6, pady=4)
 
             # 1) 텍스트
             ttk.Label(wm_right, text=_("텍스트")).grid(row=1, column=0, sticky="w", padx=6, pady=4)
             self.params_widgets["wm_text"] = tk.StringVar(value="")
-            ttk.Entry(wm_right, textvariable=self.params_widgets["wm_text"]).grid(row=1, column=1, columnspan=3,
-                                                                                  sticky="ew", padx=6, pady=4)
+            wm_text_entry = ttk.Entry(wm_right, textvariable=self.params_widgets["wm_text"])
+            wm_text_entry.grid(row=1, column=1, columnspan=4, sticky="ew", padx=6, pady=4)
 
             # 2) 폰트 파일
             ttk.Label(wm_right, text=_("폰트 파일(.ttf/.otf)")).grid(row=2, column=0, sticky="w", padx=6, pady=4)
             self.params_widgets["wm_font_path"] = tk.StringVar(value="")
-            ttk.Entry(wm_right, textvariable=self.params_widgets["wm_font_path"]).grid(row=2, column=1, columnspan=2,
-                                                                                       sticky="ew", padx=6, pady=4)
-            ttk.Button(wm_right, text=_("찾아보기..."),
-                       command=lambda: self._browse_font(self.params_widgets["wm_font_path"])
-                       ).grid(row=2, column=3, padx=6, pady=4)
+            wm_font_entry = ttk.Entry(wm_right, textvariable=self.params_widgets["wm_font_path"])
+            wm_font_entry.grid(row=2, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+            wm_font_btn = ttk.Button(wm_right, text=_("찾아보기..."),
+                                     command=lambda: self._browse_font(self.params_widgets["wm_font_path"]))
+            wm_font_btn.grid(row=2, column=4, padx=6, pady=4)
 
             # 3) 색/불투명/크기
             ttk.Label(wm_right, text=_("색상")).grid(row=3, column=0, sticky="w", padx=6, pady=4)
@@ -398,45 +398,60 @@ class AppUI:
             color_swatch = tk.Label(wm_right, width=2, relief="solid", borderwidth=1,
                                     background=self.params_widgets["wm_color"].get())
             color_swatch.grid(row=3, column=1, sticky="w", padx=(6, 2), pady=4)
-            ttk.Button(wm_right, text=_("선택"),
-                       command=lambda: self._pick_color(self.params_widgets["wm_color"], color_swatch)
-                       ).grid(row=3, column=2, sticky="w", padx=6, pady=4)
+            wm_color_btn = ttk.Button(wm_right, text=_("선택"),
+                                      command=lambda: self._pick_color(self.params_widgets["wm_color"], color_swatch))
+            wm_color_btn.grid(row=3, column=2, sticky="w", padx=6, pady=4)
 
             ttk.Label(wm_right, text=_("불투명도(%)")).grid(row=3, column=3, sticky="e", padx=6, pady=4)
             self.params_widgets["wm_opacity"] = tk.IntVar(value=50)
-            ttk.Spinbox(wm_right, from_=0, to=100, textvariable=self.params_widgets["wm_opacity"], width=5
-                        ).grid(row=3, column=4, sticky="w", padx=6, pady=4)
+            wm_opacity_sp = ttk.Spinbox(wm_right, from_=0, to=100,
+                                        textvariable=self.params_widgets["wm_opacity"], width=5)
+            wm_opacity_sp.grid(row=3, column=4, sticky="w", padx=6, pady=4)
 
             ttk.Label(wm_right, text=_("폰트 크기(px)")).grid(row=4, column=0, sticky="w", padx=6, pady=4)
             self.params_widgets["wm_font_size"] = tk.IntVar(value=36)
-            ttk.Spinbox(wm_right, from_=6, to=512, textvariable=self.params_widgets["wm_font_size"], width=6
-                        ).grid(row=4, column=1, sticky="w", padx=6, pady=4)
+            wm_fontsize_sp = ttk.Spinbox(wm_right, from_=6, to=512,
+                                         textvariable=self.params_widgets["wm_font_size"], width=6)
+            wm_fontsize_sp.grid(row=4, column=1, sticky="w", padx=6, pady=4)
 
             # 4) 위치 + 오프셋
             ttk.Label(wm_right, text=_("초기 위치")).grid(row=4, column=2, sticky="e", padx=6, pady=4)
             self.params_widgets["wm_position"] = tk.StringVar(value="bottom-right")
-            ttk.Combobox(wm_right, state="readonly", width=12,
-                         textvariable=self.params_widgets["wm_position"],
-                         values=["top-left", "top-right", "bottom-left", "bottom-right", "center"]
-                         ).grid(row=4, column=3, sticky="w", padx=6, pady=4)
+            wm_pos_combo = ttk.Combobox(wm_right, state="readonly", width=12,
+                                        textvariable=self.params_widgets["wm_position"],
+                                        values=["top-left", "top-right", "bottom-left", "bottom-right", "center"])
+            wm_pos_combo.grid(row=4, column=3, sticky="w", padx=6, pady=4)
 
             ttk.Label(wm_right, text=_("오프셋 X/Y(px)")).grid(row=5, column=0, sticky="w", padx=6, pady=4)
             self.params_widgets["wm_offset_x"] = tk.IntVar(value=16)
             self.params_widgets["wm_offset_y"] = tk.IntVar(value=16)
-            ttk.Spinbox(wm_right, from_=-2000, to=2000, textvariable=self.params_widgets["wm_offset_x"], width=7
-                        ).grid(row=5, column=1, sticky="w", padx=6, pady=4)
-            ttk.Spinbox(wm_right, from_=-2000, to=2000, textvariable=self.params_widgets["wm_offset_y"], width=7
-                        ).grid(row=5, column=2, sticky="w", padx=6, pady=4)
+            wm_offx_sp = ttk.Spinbox(wm_right, from_=-2000, to=2000,
+                                     textvariable=self.params_widgets["wm_offset_x"], width=7)
+            wm_offx_sp.grid(row=5, column=1, sticky="w", padx=6, pady=4)
+            wm_offy_sp = ttk.Spinbox(wm_right, from_=-2000, to=2000,
+                                     textvariable=self.params_widgets["wm_offset_y"], width=7)
+            wm_offy_sp.grid(row=5, column=2, sticky="w", padx=6, pady=4)
 
             # 5) 외곽선
             self.params_widgets["wm_outline"] = tk.BooleanVar(value=True)
-            ttk.Checkbutton(wm_right, text=_("외곽선"),
-                            variable=self.params_widgets["wm_outline"]).grid(row=6, column=0, sticky="w", padx=6,
-                                                                             pady=4)
+            wm_outline_chk = ttk.Checkbutton(wm_right, text=_("외곽선"),
+                                             variable=self.params_widgets["wm_outline"])
+            wm_outline_chk.grid(row=6, column=0, sticky="w", padx=6, pady=4)
             ttk.Label(wm_right, text=_("두께(px)")).grid(row=6, column=1, sticky="w", padx=6, pady=4)
             self.params_widgets["wm_outline_width"] = tk.IntVar(value=2)
-            ttk.Spinbox(wm_right, from_=1, to=20, textvariable=self.params_widgets["wm_outline_width"], width=5
-                        ).grid(row=6, column=1, sticky="w", padx=(70, 6), pady=4)
+            wm_outline_w_sp = ttk.Spinbox(wm_right, from_=1, to=20,
+                                          textvariable=self.params_widgets["wm_outline_width"], width=5)
+            wm_outline_w_sp.grid(row=6, column=2, sticky="w", padx=6, pady=4)
+
+            # ← 여기서 한 번에 등록!
+            self.params_widgets["wm_widgets"] = [
+                wm_enabled_chk, wm_text_entry,
+                wm_font_entry, wm_font_btn,
+                wm_color_btn, wm_opacity_sp,
+                wm_fontsize_sp, wm_pos_combo,
+                wm_offx_sp, wm_offy_sp,
+                wm_outline_chk, wm_outline_w_sp
+            ]
 
             # Targets header
             saved_targets = self.settings.get("last_targets", [])
@@ -511,6 +526,18 @@ class AppUI:
         self.running = flag
         self.start_btn.config(state=DISABLED if flag else NORMAL)
         self.cancel_btn.config(state=NORMAL if flag else DISABLED)
+        # 워터마크 위젯 비/활성
+        for w in self.params_widgets.get("wm_widgets", []):
+            self._set_widget_enabled(w, not flag)
+
+    def _set_widget_enabled(self, widget, enabled: bool):
+        try:
+            if isinstance(widget, ttk.Combobox):
+                widget.config(state=("readonly" if enabled else "disabled"))
+            else:
+                widget.config(state=("normal" if enabled else "disabled"))
+        except Exception:
+            pass
 
     def _log(self, text: str):
         self.log.config(state=tk.NORMAL)
