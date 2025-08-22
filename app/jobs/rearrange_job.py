@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Any, List, Optional, Tuple
 from threading import Event
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from datetime import datetime
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
@@ -36,12 +37,96 @@ SLOT_RANGES = {
     "ㄹ": [10, 11, 12],   # B(4,5,6) -> slots 10..12
 }
 
+weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+
+IMAGE_EXTS = {".jpg",".jpeg",".png",".webp",".bmp",".tiff"}
+
+def _is_image_file(p: Path) -> bool:
+    return p.is_file() and p.suffix.lower() in IMAGE_EXTS
+
+def _rgba_from_hex(hex_color: str, alpha_pct: int) -> tuple[int,int,int,int]:
+    hex_color = (hex_color or "#FFFFFF").lstrip("#")
+    if len(hex_color) == 3:
+        hex_color = "".join(ch*2 for ch in hex_color)
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    a = max(0, min(255, int(255 * (alpha_pct/100.0))))
+    return (r,g,b,a)
+
+def _calc_position(w: int, h: int, tw: int, th: int, preset: str, dx: int, dy: int) -> tuple[int,int]:
+    # preset: top-left/top-right/bottom-left/bottom-right/center
+    if preset == "top-left":
+        x, y = 0 + dx, 0 + dy
+    elif preset == "top-right":
+        x, y = w - tw - dx, 0 + dy
+    elif preset == "bottom-left":
+        x, y = 0 + dx, h - th - dy
+    elif preset == "bottom-right":
+        x, y = w - tw - dx, h - th - dy
+    else:  # center
+        x, y = (w - tw)//2 + dx, (h - th)//2 + dy
+    return (x, y)
+
+def _apply_text_watermark(img: Image.Image, wm: dict) -> Image.Image:
+    if not wm.get("enabled"):
+        return img
+
+    text = wm.get("text") or ""
+    if not text.strip():
+        return img
+
+    font_size = max(6, int(wm.get("font_size", 36)))
+    font_path = (wm.get("font_path") or "").strip()
+    try:
+        if font_path:
+            font = ImageFont.truetype(font_path, font_size)
+        else:
+            font = ImageFont.load_default()
+    except Exception:
+        font = ImageFont.load_default()
+
+    # 작업은 RGBA에서
+    if img.mode != "RGBA":
+        base = img.convert("RGBA")
+    else:
+        base = img.copy()
+
+    W, H = base.size
+    overlay = Image.new("RGBA", (W, H), (0,0,0,0))
+    draw = ImageDraw.Draw(overlay)
+
+    # 텍스트 바운딩 계산
+    try:
+        bbox = draw.multiline_textbbox((0,0), text, font=font, align="left")
+        tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
+    except Exception:
+        tw, th = draw.multiline_textsize(text, font=font)
+
+    x, y = _calc_position(W, H, tw, th,
+                          wm.get("position","bottom-right"),
+                          int(wm.get("offset_x",16)),
+                          int(wm.get("offset_y",16)))
+
+    fill = _rgba_from_hex(wm.get("color","#FFFFFF"), int(wm.get("opacity",50)))
+
+    # 외곽선
+    if wm.get("outline", True):
+        ow = max(1, int(wm.get("outline_width", 2)))
+        outline_fill = (0,0,0, fill[3])  # 검정, 동일 알파
+        # 8방향 반복
+        for r in range(1, ow+1):
+            for dx, dy in ((-r,0),(r,0),(0,-r),(0,r),(-r,-r),(-r,r),(r,-r),(r,r)):
+                draw.multiline_text((x+dx, y+dy), text, font=font, fill=outline_fill)
+
+    # 본문
+    draw.multiline_text((x, y), text, font=font, fill=fill)
+
+    out = Image.alpha_composite(base, overlay).convert(img.mode)
+    return out
+
+
 def _today_kor_daychar(tz_name: str = "Asia/Seoul") -> str:
-    """
-    오늘의 요일을 한글 한 글자(월~일)로 반환.
-    KST(Asia/Seoul) 우선, 실패 시 로컬 시간 사용.
-    """
-    weekdays = ["월", "화", "수", "목", "금", "토", "일"]  # Monday=0
     try:
         if ZoneInfo:
             idx = datetime.now(ZoneInfo(tz_name)).weekday()
@@ -50,6 +135,16 @@ def _today_kor_daychar(tz_name: str = "Asia/Seoul") -> str:
     except Exception:
         idx = datetime.now().weekday()
     return weekdays[idx]
+
+def _day_of_week(idx: int) -> str:
+    return weekdays[idx % 7]
+
+def _dow_of_idx(dow: str) -> int:
+    return weekdays.index(dow)
+
+def _next_of_now(now: str, nxt: int) -> str:
+    return _day_of_week(_dow_of_idx(now) + nxt)
+
 
 @dataclass
 class TargetSlot:
@@ -90,6 +185,47 @@ def _copy_tree(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, dst)
 
+def _copy_tree_with_optional_watermark(src: Path, dst: Path, wm: dict | None):
+    """
+    wm.enabled 가 True면 이미지 파일들에 워터마크를 적용해서 복사,
+    아니면 그냥 copytree.
+    """
+    if not wm or not wm.get("enabled"):
+        _copy_tree(src, dst)
+        return
+
+    # 수동으로 걷기
+    import os
+    for root, dirs, files in os.walk(src):
+        rel = Path(root).relative_to(src)
+        out_dir = dst / rel
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # 하위 폴더
+        for d in dirs:
+            (out_dir / d).mkdir(exist_ok=True)
+
+        # 파일
+        for fn in files:
+            sp = Path(root) / fn
+            dp = out_dir / fn
+            try:
+                if _is_image_file(sp):
+                    with Image.open(sp) as im:
+                        out_im = _apply_text_watermark(im, wm)
+                        # 포맷 유지 시도
+                        fmt = (im.format or "").upper() or None
+                        if fmt in {"JPEG","JPG"}:
+                            out_im.save(dp, format="JPEG", quality=95)  # 무손실 아님 주의
+                        else:
+                            out_im.save(dp)
+                else:
+                    shutil.copy2(sp, dp)
+            except Exception:
+                # 문제 생기면 원본 그대로 복사
+                shutil.copy2(sp, dp)
+
+
 # --------------------- NEW: collect & normalize posts ---------------------
 def _collect_and_normalize_posts(account_dir: Optional[Path]) -> Dict[int, Optional[Path]]:
     """
@@ -113,6 +249,124 @@ def _collect_and_normalize_posts(account_dir: Optional[Path]) -> Dict[int, Optio
         mapping[i] = p
 
     return mapping
+
+def _hex_to_rgba(color_hex: str, opacity_pct: int) -> tuple[int, int, int, int]:
+    try:
+        color_hex = color_hex.strip()
+        if color_hex.startswith("#"):
+            color_hex = color_hex[1:]
+        if len(color_hex) == 3:  # e.g. FFF
+            color_hex = "".join(c*2 for c in color_hex)
+        r = int(color_hex[0:2], 16)
+        g = int(color_hex[2:4], 16)
+        b = int(color_hex[4:6], 16)
+    except Exception:
+        r, g, b = 255, 255, 255
+    a = max(0, min(100, int(opacity_pct)))
+    a = int(255 * (a / 100.0))
+    return (r, g, b, a)
+
+def _pick_font(font_path: str, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    try:
+        if font_path:
+            return ImageFont.truetype(font_path, size)
+    except Exception:
+        pass
+    # Windows 기본 한글 폰트 후보 (있으면 사용)
+    for win_font in [r"C:\Windows\Fonts\malgun.ttf", r"C:\Windows\Fonts\malgunbd.ttf"]:
+        try:
+            return ImageFont.truetype(win_font, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+def _measure_text(text: str, font, stroke_width: int) -> tuple[int, int]:
+    dummy = Image.new("RGBA", (10, 10))
+    d = ImageDraw.Draw(dummy)
+    try:
+        bbox = d.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+    except Exception:
+        w, h = d.textsize(text, font=font)
+    return w, h
+
+def _place_xy(img_w: int, img_h: int, text_w: int, text_h: int,
+              preset: str, off_x: int, off_y: int) -> tuple[int, int]:
+    preset = (preset or "bottom-right").lower()
+    if preset == "top-left":
+        x, y = 0 + off_x, 0 + off_y
+    elif preset == "top-right":
+        x, y = img_w - text_w - off_x, 0 + off_y
+    elif preset == "bottom-left":
+        x, y = 0 + off_x, img_h - text_h - off_y
+    elif preset == "center":
+        x, y = (img_w - text_w) // 2 + off_x, (img_h - text_h) // 2 + off_y
+    else:  # bottom-right
+        x, y = img_w - text_w - off_x, img_h - text_h - off_y
+    return x, y
+
+def _watermark_image_inplace(path: Path, cfg: dict, plans: list[str], dry: bool) -> int:
+    if path.suffix.lower() not in IMAGE_EXTS:
+        return 0
+    text = (cfg.get("text") or "").strip()
+    if not text:
+        return 0
+
+    try:
+        im = Image.open(str(path))
+        im = ImageOps.exif_transpose(im)
+        base_mode = "RGBA" if im.mode != "RGBA" else im.mode
+        base = im.convert("RGBA")
+
+        font = _pick_font(cfg.get("font_path", ""), int(cfg.get("font_size", 36)))
+        stroke_w = int(cfg.get("outline_width", 2)) if cfg.get("outline", True) else 0
+        tw, th = _measure_text(text, font, stroke_w)
+        x, y = _place_xy(base.width, base.height, tw, th,
+                         cfg.get("position", "bottom-right"),
+                         int(cfg.get("offset_x", 16)), int(cfg.get("offset_y", 16)))
+
+        txt_layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(txt_layer)
+
+        fill_rgba = _hex_to_rgba(cfg.get("color", "#FFFFFF"), int(cfg.get("opacity", 50)))
+        # 외곽선은 자동 대비색(검/흰)으로
+        lum = 0.2126*fill_rgba[0] + 0.7152*fill_rgba[1] + 0.0722*fill_rgba[2]
+        stroke_fill = (0, 0, 0, fill_rgba[3]) if lum > 128 else (255, 255, 255, fill_rgba[3])
+
+        if dry:
+            plans.append(f"[DRY][WM] {path.name}  <-  '{text}' pos={cfg.get('position')} size={cfg.get('font_size')}")
+            return 1
+
+        draw.text((x, y), text, font=font, fill=fill_rgba,
+                  stroke_width=stroke_w, stroke_fill=stroke_fill)
+        out = Image.alpha_composite(base, txt_layer)
+
+        # 포맷 맞춰 저장
+        fmt = (im.format or path.suffix.replace(".", "").upper())
+        if fmt.upper() in ("JPG", "JPEG"):
+            out = out.convert("RGB")
+        out.save(str(path))
+        return 1
+    except Exception as e:
+        plans.append(f"[WM][skip] {path} ({e})")
+        return 0
+
+def _watermark_all_images(root: Path, cfg: dict, plans: list[str], dry: bool,
+                          step: Callable[[str], None]) -> int:
+    count = 0
+    if root.is_file():
+        count += _watermark_image_inplace(root, cfg, plans, dry)
+        if count:
+            step("Watermarking")
+        return count
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
+            count += _watermark_image_inplace(p, cfg, plans, dry)
+            if count % 5 == 0:
+                step("Watermarking")
+    return count
+
 
 # -------------------------------------------------------------------------
 
@@ -147,6 +401,7 @@ class RearrangeJob:
             progress_cb: Callable[[int, str], None],
             cancel_event: Event):
         params: Dict[str, Any] = context.get("params", {})
+        watermark_cfg: dict = params.get("watermark", {}) or {}
 
         A_root = Path(params["A_root"])
         B_root = Path(params["B_root"])
@@ -228,8 +483,6 @@ class RearrangeJob:
             pct = min(100, int(done * 100 / total_ops))
             progress_cb(pct, msg)
 
-        plans: List[str] = []
-
         # ---------- Mapping summary (always log) ----------
         # 드라이런 헤더 (맨 위에 보이게 하고 싶으면 insert(0, ...) 써도 됩니다)
         plans.append(_("==== DRY RUN PLAN (no changes made) ====")) if dry_run else None
@@ -253,75 +506,109 @@ class RearrangeJob:
             src = slot_to_src.get(slot)
             plans.append(f"slot {slot:2d}  <-  {src if src else '(missing)'}")
 
-        plans.append("==== SLOT → SOURCE ACCOUNT ====")
-        for slot in range(1, 13):
-            src = slot_to_src.get(slot)
-            plans.append(f"slot {slot:2d}  <-  {src if src else '(missing)'}")
-
         # 오늘 요일 기반 day 라벨 만들기
         today_char = _today_kor_daychar()
-        day_label_A = f"{today_char}-A"  # 기존 '월' 자리에 사용
-        day_label_B = f"{today_char}-B"  # 기존 '화' 자리에 사용
 
-        plans.append(f"DEST DAY LABELS: {day_label_A} (slots 1–6), {day_label_B} (slots 7–12)")
+        if today_char == '월':
+            day_label_a = '월'
+            day_label_b = '화'
+        elif today_char == '금':
+            day_label_a = '일'
+            day_label_b = '월'
+        else :
+            day_label_a = _next_of_now(today_char, 1)
+            day_label_b = _next_of_now(today_char, 2)
+
+        # day_label_a = f"{today_char}-A"  # 기존 '월' 자리에 사용
+        # day_label_b = f"{today_char}-B"  # 기존 '화' 자리에 사용
+
+        label_parent_map = {
+            "유미": f"A그룹-{today_char}",
+            "상근": f"B그룹-{today_char}",
+        }
+
+        plans.append(f"DEST DAY LABELS: {day_label_a} (slots 1–6), {day_label_b} (slots 7–12)")
 
         def get_dest_parent(slot_idx: int, label: str, day: str) -> Path:
             ts = targets[slot_idx - 1]
+            parent_name = label_parent_map[label]
+
             if ts.existing_path:
-                # 기존 폴더 선택 시: 그대로 사용, 그 아래 라벨/요일만 붙임 (번호 X)
-                base = ts.existing_path / label / day
+                base = ts.existing_path / parent_name / day
             else:
                 if not ts.name:
                     raise ValueError(f"Target slot {slot_idx} requires a name or existing path.")
-                # ✅ 새 폴더 생성 시: "슬롯번호. 이름" 형식으로 만듦
-                numbered_name = f"{slot_idx}. {ts.name.strip()}"
-                base = target_root / label / day / numbered_name
+                base = target_root / parent_name / day / ts.name
             return base
 
         # copy helper (uses NORMALIZED posts)
         def copy_account_posts(src_account_dir: Optional[Path], dest_parent: Path, order: List[int], dry: bool):
+            # 1) 소스 계정에서 1..5 매핑(사전순 정렬 기반)
             posts = _collect_and_normalize_posts(src_account_dir)  # 1..5 -> Path|None
 
-            # Prepare dest parent
+            # 2) 목적지 부모 폴더 준비
             if dry:
                 final_parent = dest_parent
             else:
                 final_parent = _ensure_unique_dir(dest_parent.parent, dest_parent.name)
                 final_parent.mkdir(parents=True, exist_ok=True)
 
+                # 최근 결과 폴더 추적(이미 쓰고 계신 로직 그대로 유지)
                 context.setdefault("_result_dirs", [])
                 fp = str(final_parent)
                 if fp not in context["_result_dirs"]:
                     context["_result_dirs"].append(fp)
 
-            # For each of 1..5 mapped via 'order'
+            # 3) 5개 게시물 순서대로 복사(+워터마크)
             for new_idx, src_num in enumerate(order, start=1):
                 src_path = posts.get(src_num)
 
-                # Build destination folder name
+                # 목적지 폴더명 만들기
                 if src_path is not None:
-                    # 파일이면 확장자 제거(stem), 폴더면 폴더명 그대로 사용
                     base_name = src_path.stem if src_path.is_file() else src_path.name
-                    # 앞의 "N. " 패턴 제거
-                    m = POST_NUM_RE.match(base_name)
+                    m = POST_NUM_RE.match(base_name)  # "N. " 접두 제거
                     tail = base_name[m.end():] if m else base_name
                     dst_name = f"{new_idx}. {tail.strip()}"
                 else:
                     dst_name = f"{new_idx}. (missing)"
 
                 dst_dir = final_parent / dst_name
+
                 if dry:
+                    # -------- DRY RUN: 복사 계획 + 워터마크 계획만 로그 --------
                     plans.append(f"[DRY] {src_path if src_path else '(missing)'}  ->  {dst_dir}")
+
+                    if watermark_cfg.get("enabled") and src_path and src_path.exists():
+                        if src_path.is_file() and src_path.suffix.lower() in IMAGE_EXTS:
+                            plans.append(f"[DRY][WM] {src_path.name} -> ({dst_dir})")
+                        elif src_path.is_dir():
+                            cnt = sum(
+                                1 for p in src_path.rglob("*")
+                                if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+                            )
+                            plans.append(f"[DRY][WM] {cnt} images -> ({dst_dir})")
+
                 else:
+                    # -------- 실제 복사 --------
                     unique_dst = _ensure_unique_dir(final_parent, dst_name)
                     if src_path and src_path.exists():
                         if src_path.is_dir():
-                            _copy_tree(src_path, unique_dst)  # 폴더 게시물: 통째 복사
+                            _copy_tree(src_path, unique_dst)
                         else:
-                            unique_dst.mkdir(parents=True, exist_ok=True)  # 파일 게시물: 폴더 만들고
+                            unique_dst.mkdir(parents=True, exist_ok=True)
                             shutil.copy2(src_path, unique_dst / src_path.name)
                     else:
                         unique_dst.mkdir(parents=True, exist_ok=True)  # placeholder
+
+                    # -------- 여기서 워터마크 적용 --------
+                    if watermark_cfg.get("enabled"):
+                        _watermark_all_images(
+                            unique_dst,
+                            watermark_cfg,
+                            plans,
+                            dry=False,
+                            step=lambda _m: step("Watermarking"),
+                        )
 
                 step(f"Copying posts to: {final_parent.name}")
 
@@ -333,7 +620,7 @@ class RearrangeJob:
             for slot in range(1, 7):
                 if cancel_event.is_set(): return
                 src = slot_to_src.get(slot)
-                dest_parent = get_dest_parent(slot, label, day_label_A)  # ✅ 경로는 '오늘요일-A'
+                dest_parent = get_dest_parent(slot, label, day_label_a)  # ✅ 경로는 '오늘요일-A'
                 copy_account_posts(src, dest_parent, day_order, dry_run)
 
             # B세트(기존 '화'): slots 7..12
@@ -342,12 +629,9 @@ class RearrangeJob:
             for slot in range(7, 13):
                 if cancel_event.is_set(): return
                 src = slot_to_src.get(slot)
-                dest_parent = get_dest_parent(slot, label, day_label_B)  # ✅ 경로는 '오늘요일-B'
+                dest_parent = get_dest_parent(slot, label, day_label_b)  # ✅ 경로는 '오늘요일-B'
                 copy_account_posts(src, dest_parent, day_order, dry_run)
 
-        # Emit logs
-        if dry_run:
-            plans.insert(0, "==== DRY RUN PLAN (no changes made) ====")
         context.setdefault("_ui_logs", []).extend(plans)
 
         step("Done.")
