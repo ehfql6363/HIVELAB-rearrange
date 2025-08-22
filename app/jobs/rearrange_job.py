@@ -367,6 +367,72 @@ def _watermark_all_images(root: Path, cfg: dict, plans: list[str], dry: bool,
                 step("Watermarking")
     return count
 
+def _parse_size(preset: str) -> tuple[int, int]:
+    try:
+        w, h = preset.lower().split("x")
+        return int(w), int(h)
+    except Exception:
+        return (1080, 1080)
+
+def _resize_cover(img: Image.Image, tw: int, th: int) -> Image.Image:
+    # EXIF 회전을 반영
+    img = ImageOps.exif_transpose(img)
+    sw, sh = img.size
+    if sw == 0 or sh == 0:
+        return img
+
+    # 비율 유지 확대: 목표 해상도를 '덮도록' 스케일
+    scale = max(tw / sw, th / sh)
+    nw, nh = int(round(sw * scale)), int(round(sh * scale))
+    resized = img.resize((nw, nh), resample=Image.LANCZOS)
+
+    # 중앙 크롭
+    left = max(0, (nw - tw) // 2)
+    top = max(0, (nh - th) // 2)
+    right = left + tw
+    bottom = top + th
+    cropped = resized.crop((left, top, right, bottom))
+    return cropped
+
+def _resize_image_inplace(path: Path, cfg: dict, plans: list[str], dry: bool) -> int:
+    if path.suffix.lower() not in IMAGE_EXTS:
+        return 0
+    tw, th = _parse_size(cfg.get("preset", "1080x1080"))
+    try:
+        with Image.open(str(path)) as im:
+            if dry:
+                plans.append(f"[DRY][RSZ] {path.name} -> {tw}x{th}")
+                return 1
+            out = _resize_cover(im, tw, th)
+
+            # 저장 포맷 유지
+            fmt = (im.format or path.suffix.replace(".", "")).upper()
+            if fmt in ("JPG", "JPEG"):
+                out = out.convert("RGB")
+                out.save(str(path), format="JPEG", quality=95)
+            else:
+                out.save(str(path))
+        return 1
+    except Exception as e:
+        plans.append(f"[RSZ][skip] {path} ({e})")
+        return 0
+
+def _resize_all_images(root: Path, cfg: dict, plans: list[str], dry: bool,
+                       step: Callable[[str], None]) -> int:
+    cnt = 0
+    if root.is_file():
+        cnt += _resize_image_inplace(root, cfg, plans, dry)
+        if cnt:
+            step("Resizing")
+        return cnt
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
+            cnt += _resize_image_inplace(p, cfg, plans, dry)
+            if cnt % 5 == 0:
+                step("Resizing")
+    return cnt
+
+
 
 # -------------------------------------------------------------------------
 
@@ -402,6 +468,7 @@ class RearrangeJob:
             cancel_event: Event):
         params: Dict[str, Any] = context.get("params", {})
         watermark_cfg: dict = params.get("watermark", {}) or {}
+        resize_cfg: dict = params.get("resize", {}) or {}
 
         A_root = Path(params["A_root"])
         B_root = Path(params["B_root"])
@@ -578,6 +645,14 @@ class RearrangeJob:
                     # -------- DRY RUN: 복사 계획 + 워터마크 계획만 로그 --------
                     plans.append(f"[DRY] {src_path if src_path else '(missing)'}  ->  {dst_dir}")
 
+                    if resize_cfg.get("enabled") and src_path and src_path.exists():
+                        if src_path.is_file() and src_path.suffix.lower() in IMAGE_EXTS:
+                            plans.append(f"[DRY][RSZ] {src_path.name} -> ({dst_dir}) {resize_cfg.get('preset')}")
+                        elif src_path.is_dir():
+                            cnt_rsz = sum(1 for p in src_path.rglob("*")
+                                          if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
+                            plans.append(f"[DRY][RSZ] {cnt_rsz} images -> ({dst_dir}) {resize_cfg.get('preset')}")
+
                     if watermark_cfg.get("enabled") and src_path and src_path.exists():
                         if src_path.is_file() and src_path.suffix.lower() in IMAGE_EXTS:
                             plans.append(f"[DRY][WM] {src_path.name} -> ({dst_dir})")
@@ -589,8 +664,8 @@ class RearrangeJob:
                             plans.append(f"[DRY][WM] {cnt} images -> ({dst_dir})")
 
                 else:
-                    # -------- 실제 복사 --------
                     unique_dst = _ensure_unique_dir(final_parent, dst_name)
+
                     if src_path and src_path.exists():
                         if src_path.is_dir():
                             _copy_tree(src_path, unique_dst)
@@ -600,7 +675,17 @@ class RearrangeJob:
                     else:
                         unique_dst.mkdir(parents=True, exist_ok=True)  # placeholder
 
-                    # -------- 여기서 워터마크 적용 --------
+                    # 1) 리사이즈(자르기) 먼저
+                    if resize_cfg.get("enabled"):
+                        _resize_all_images(
+                            unique_dst,
+                            resize_cfg,
+                            plans,
+                            dry=False,
+                            step=lambda _m: step("Resizing"),
+                        )
+
+                    # 2) 워터마크는 리사이즈 후 적용 (텍스트 선명도 유지)
                     if watermark_cfg.get("enabled"):
                         _watermark_all_images(
                             unique_dst,

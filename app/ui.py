@@ -453,6 +453,28 @@ class AppUI:
                 wm_outline_chk, wm_outline_w_sp
             ]
 
+            # ---------- RIGHT: 리사이즈/자르기 ----------
+            rz_right = ttk.LabelFrame(container, text=_("리사이즈/자르기"))
+            rz_right.grid(row=1, column=1, sticky="nsew", padx=(6, 0))
+            for c in range(3):
+                rz_right.grid_columnconfigure(c, weight=1)
+
+            self.params_widgets["rz_enabled"] = tk.BooleanVar(value=False)
+            rz_enabled_chk = ttk.Checkbutton(rz_right, text=_("리사이즈 적용(자르기 포함)"),
+                                             variable=self.params_widgets["rz_enabled"])
+            rz_enabled_chk.grid(row=0, column=0, columnspan=3, sticky="w", padx=6, pady=4)
+
+            ttk.Label(rz_right, text=_("목표 해상도")).grid(row=1, column=0, sticky="w", padx=6, pady=4)
+            self.params_widgets["rz_preset"] = tk.StringVar(value="1080x1080")
+            rz_combo = ttk.Combobox(rz_right, state="readonly", width=12,
+                                    textvariable=self.params_widgets["rz_preset"],
+                                    values=["1080x1080", "1080x1350", "1080x1920"])
+            rz_combo.grid(row=1, column=1, sticky="w", padx=6, pady=4)
+
+            # 실행 중 편집 잠그기 위해 위젯 모아두기
+            self.params_widgets.setdefault("rz_widgets", [])
+            self.params_widgets["rz_widgets"].extend([rz_enabled_chk, rz_combo])
+
             # Targets header
             saved_targets = self.settings.get("last_targets", [])
 
@@ -526,9 +548,16 @@ class AppUI:
         self.running = flag
         self.start_btn.config(state=DISABLED if flag else NORMAL)
         self.cancel_btn.config(state=NORMAL if flag else DISABLED)
-        # 워터마크 위젯 비/활성
-        for w in self.params_widgets.get("wm_widgets", []):
-            self._set_widget_enabled(w, not flag)
+        # 워터마크/리사이즈 위젯 비/활성
+        for w in self.params_widgets.get("wm_widgets", []) + self.params_widgets.get("rz_widgets", []):
+            try:
+                # 콤보박스는 readonly/disabled, 나머지는 normal/disabled
+                if isinstance(w, ttk.Combobox):
+                    w.config(state=("readonly" if not flag else "disabled"))
+                else:
+                    w.config(state=("normal" if not flag else "disabled"))
+            except Exception:
+                pass
 
     def _set_widget_enabled(self, widget, enabled: bool):
         try:
@@ -598,7 +627,10 @@ class AppUI:
                     "outline": bool(self.params_widgets.get("wm_outline").get()),
                     "outline_width": int(self.params_widgets.get("wm_outline_width").get()),
                 },
-
+                "resize": {
+                    "enabled": bool(self.params_widgets.get("rz_enabled").get()),
+                    "preset": self.params_widgets.get("rz_preset").get(),  # e.g. "1080x1350"
+                },
             }
             for name_var, path_var in self.params_widgets.get("targets", []):
                 params["targets"].append({"name": name_var.get(), "path": path_var.get()})
