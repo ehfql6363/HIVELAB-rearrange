@@ -52,7 +52,7 @@ def _rgba_from_hex(hex_color: str, alpha_pct: int) -> tuple[int,int,int,int]:
     g = int(hex_color[2:4], 16)
     b = int(hex_color[4:6], 16)
     a = max(0, min(255, int(255 * (alpha_pct/100.0))))
-    return (r,g,b,a)
+    return r,g,b,a
 
 def _calc_position(w: int, h: int, tw: int, th: int, preset: str, dx: int, dy: int) -> tuple[int,int]:
     # preset: top-left/top-right/bottom-left/bottom-right/center
@@ -66,7 +66,7 @@ def _calc_position(w: int, h: int, tw: int, th: int, preset: str, dx: int, dy: i
         x, y = w - tw - dx, h - th - dy
     else:  # center
         x, y = (w - tw)//2 + dx, (h - th)//2 + dy
-    return (x, y)
+    return x, y
 
 def _apply_text_watermark(img: Image.Image, wm: dict) -> Image.Image:
     if not wm.get("enabled"):
@@ -397,18 +397,26 @@ def _resize_cover(img: Image.Image, tw: int, th: int) -> Image.Image:
 def _resize_image_inplace(path: Path, cfg: dict, plans: list[str], dry: bool) -> int:
     if path.suffix.lower() not in IMAGE_EXTS:
         return 0
+
     tw, th = _parse_size(cfg.get("preset", "1080x1080"))
+    mode = (cfg.get("mode") or "contain").lower()
+    bg_hex = cfg.get("bg_color", "#000000")
+
     try:
         with Image.open(str(path)) as im:
             if dry:
-                plans.append(f"[DRY][RSZ] {path.name} -> {tw}x{th}")
+                plans.append(f"[DRY][RSZ] {path.name} -> {tw}x{th} ({mode})")
                 return 1
-            out = _resize_cover(im, tw, th)
 
-            # 저장 포맷 유지
+            if mode == "cover":
+                out = _resize_cover(im, tw, th)
+            else:  # contain
+                out = _resize_contain_pad(im, tw, th, bg_hex)
+
+            # 파일 포맷 유지해서 저장
             fmt = (im.format or path.suffix.replace(".", "")).upper()
             if fmt in ("JPG", "JPEG"):
-                out = out.convert("RGB")
+                out = out.convert("RGB")  # JPEG은 알파 미지원
                 out.save(str(path), format="JPEG", quality=95)
             else:
                 out.save(str(path))
@@ -416,6 +424,7 @@ def _resize_image_inplace(path: Path, cfg: dict, plans: list[str], dry: bool) ->
     except Exception as e:
         plans.append(f"[RSZ][skip] {path} ({e})")
         return 0
+
 
 def _resize_all_images(root: Path, cfg: dict, plans: list[str], dry: bool,
                        step: Callable[[str], None]) -> int:
@@ -431,6 +440,55 @@ def _resize_all_images(root: Path, cfg: dict, plans: list[str], dry: bool,
             if cnt % 5 == 0:
                 step("Resizing")
     return cnt
+
+def _parse_size(preset: str) -> tuple[int, int]:
+    try:
+        w, h = preset.lower().split("x")
+        return int(w), int(h)
+    except Exception:
+        return (1080, 1080)
+
+def _rgb_from_hex(hex_color: str) -> tuple[int,int,int]:
+    s = (hex_color or "#000000").lstrip("#")
+    if len(s) == 3:
+        s = "".join(c*2 for c in s)
+    try:
+        return int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+    except Exception:
+        return (0, 0, 0)
+
+def _resize_cover(img: Image.Image, tw: int, th: int) -> Image.Image:
+    # 기존 cover(자르기) 유지
+    img = ImageOps.exif_transpose(img)
+    sw, sh = img.size
+    if sw == 0 or sh == 0:
+        return img
+    scale = max(tw / sw, th / sh)
+    nw, nh = int(round(sw * scale)), int(round(sh * scale))
+    resized = img.resize((nw, nh), resample=Image.LANCZOS)
+    left = max(0, (nw - tw) // 2); top = max(0, (nh - th) // 2)
+    return resized.crop((left, top, left + tw, top + th))
+
+def _resize_contain_pad(img: Image.Image, tw: int, th: int, bg_hex: str) -> Image.Image:
+    # 새로 추가: contain(패딩) — 잘리지 않음
+    img = ImageOps.exif_transpose(img)
+    sw, sh = img.size
+    if sw == 0 or sh == 0:
+        return img
+
+    scale = min(tw / sw, th / sh)  # 비율 유지, 목표 프레임 안에 '맞춤'
+    nw, nh = int(round(sw * scale)), int(round(sh * scale))
+    resized = img.resize((nw, nh), resample=Image.LANCZOS)
+
+    bg = _rgb_from_hex(bg_hex)
+    # 투명이 있는 PNG도 고려해서 RGBA 캔버스 생성 후 필요한 경우 RGB로 변환하여 저장
+    canvas = Image.new("RGBA", (tw, th), tuple(list(bg) + [255]))
+    # 중앙 배치
+    left = (tw - nw) // 2
+    top = (th - nh) // 2
+    canvas.paste(resized.convert("RGBA"), (left, top), resized.convert("RGBA") if resized.mode in ("RGBA","LA") else None)
+    return canvas
+
 
 
 

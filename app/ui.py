@@ -456,24 +456,53 @@ class AppUI:
             # ---------- RIGHT: 리사이즈/자르기 ----------
             rz_right = ttk.LabelFrame(container, text=_("리사이즈/자르기"))
             rz_right.grid(row=1, column=1, sticky="nsew", padx=(6, 0))
-            for c in range(3):
+            for c in range(5):
                 rz_right.grid_columnconfigure(c, weight=1)
 
             self.params_widgets["rz_enabled"] = tk.BooleanVar(value=False)
-            rz_enabled_chk = ttk.Checkbutton(rz_right, text=_("리사이즈 적용(자르기 포함)"),
-                                             variable=self.params_widgets["rz_enabled"])
-            rz_enabled_chk.grid(row=0, column=0, columnspan=3, sticky="w", padx=6, pady=4)
+            rz_enabled_chk = ttk.Checkbutton(
+                rz_right, text=_("리사이즈 적용"),
+                variable=self.params_widgets["rz_enabled"]
+            )
+            rz_enabled_chk.grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=4)
 
-            ttk.Label(rz_right, text=_("목표 해상도")).grid(row=1, column=0, sticky="w", padx=6, pady=4)
+            # 모드: 맞추기(패딩) / 채우기(자르기)
+            ttk.Label(rz_right, text=_("모드")).grid(row=1, column=0, sticky="w", padx=6, pady=4)
+            self.params_widgets["rz_mode"] = tk.StringVar(value="contain")
+            rz_mode_combo = ttk.Combobox(
+                rz_right, state="readonly", width=14,
+                textvariable=self.params_widgets["rz_mode"],
+                values=["contain", "cover"]  # contain=패딩, cover=자르기
+            )
+            rz_mode_combo.grid(row=1, column=1, sticky="w", padx=6, pady=4)
+            self._add_tooltip(rz_mode_combo, _("contain: 패딩으로 채워 잘리지 않음 / cover: 잘라서 꽉 채움"))
+
+            # 목표 해상도
+            ttk.Label(rz_right, text=_("목표 해상도")).grid(row=1, column=2, sticky="e", padx=6, pady=4)
             self.params_widgets["rz_preset"] = tk.StringVar(value="1080x1080")
-            rz_combo = ttk.Combobox(rz_right, state="readonly", width=12,
-                                    textvariable=self.params_widgets["rz_preset"],
-                                    values=["1080x1080", "1080x1350", "1080x1920"])
-            rz_combo.grid(row=1, column=1, sticky="w", padx=6, pady=4)
+            rz_preset_combo = ttk.Combobox(
+                rz_right, state="readonly", width=12,
+                textvariable=self.params_widgets["rz_preset"],
+                values=["1080x1080", "1080x1350", "1080x1920"]
+            )
+            rz_preset_combo.grid(row=1, column=3, sticky="w", padx=6, pady=4)
 
-            # 실행 중 편집 잠그기 위해 위젯 모아두기
+            # 배경색(패딩 색) - contain에서 사용
+            ttk.Label(rz_right, text=_("배경색(패딩)")).grid(row=2, column=0, sticky="w", padx=6, pady=4)
+            self.params_widgets["rz_bg_color"] = tk.StringVar(value="#000000")
+            rz_color_swatch = tk.Label(
+                rz_right, width=2, relief="solid", borderwidth=1,
+                background=self.params_widgets["rz_bg_color"].get()
+            )
+            rz_color_swatch.grid(row=2, column=1, sticky="w", padx=(6, 2), pady=4)
+            ttk.Button(
+                rz_right, text=_("선택"),
+                command=lambda: self._pick_color(self.params_widgets["rz_bg_color"], rz_color_swatch)
+            ).grid(row=2, column=2, sticky="w", padx=6, pady=4)
+
+            # 실행 중 편집 잠그기
             self.params_widgets.setdefault("rz_widgets", [])
-            self.params_widgets["rz_widgets"].extend([rz_enabled_chk, rz_combo])
+            self.params_widgets["rz_widgets"].extend([rz_enabled_chk, rz_mode_combo, rz_preset_combo])
 
             # Targets header
             saved_targets = self.settings.get("last_targets", [])
@@ -548,10 +577,10 @@ class AppUI:
         self.running = flag
         self.start_btn.config(state=DISABLED if flag else NORMAL)
         self.cancel_btn.config(state=NORMAL if flag else DISABLED)
-        # 워터마크/리사이즈 위젯 비/활성
+
+        # 워터마크/리사이즈 위젯 비활성화
         for w in self.params_widgets.get("wm_widgets", []) + self.params_widgets.get("rz_widgets", []):
             try:
-                # 콤보박스는 readonly/disabled, 나머지는 normal/disabled
                 if isinstance(w, ttk.Combobox):
                     w.config(state=("readonly" if not flag else "disabled"))
                 else:
@@ -629,7 +658,9 @@ class AppUI:
                 },
                 "resize": {
                     "enabled": bool(self.params_widgets.get("rz_enabled").get()),
-                    "preset": self.params_widgets.get("rz_preset").get(),  # e.g. "1080x1350"
+                    "mode": self.params_widgets.get("rz_mode").get(),          # "contain" | "cover"
+                    "preset": self.params_widgets.get("rz_preset").get(),      # e.g. "1080x1080"
+                    "bg_color": self.params_widgets.get("rz_bg_color").get(),  # "#RRGGBB" (contain에서 사용)
                 },
             }
             for name_var, path_var in self.params_widgets.get("targets", []):
