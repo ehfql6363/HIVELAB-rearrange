@@ -367,32 +367,32 @@ def _watermark_all_images(root: Path, cfg: dict, plans: list[str], dry: bool,
                 step("Watermarking")
     return count
 
-def _parse_size(preset: str) -> tuple[int, int]:
-    try:
-        w, h = preset.lower().split("x")
-        return int(w), int(h)
-    except Exception:
-        return (1080, 1080)
+# def _parse_size(preset: str) -> tuple[int, int]:
+#     try:
+#         w, h = preset.lower().split("x")
+#         return int(w), int(h)
+#     except Exception:
+#         return (1080, 1080)
 
-def _resize_cover(img: Image.Image, tw: int, th: int) -> Image.Image:
-    # EXIF 회전을 반영
-    img = ImageOps.exif_transpose(img)
-    sw, sh = img.size
-    if sw == 0 or sh == 0:
-        return img
-
-    # 비율 유지 확대: 목표 해상도를 '덮도록' 스케일
-    scale = max(tw / sw, th / sh)
-    nw, nh = int(round(sw * scale)), int(round(sh * scale))
-    resized = img.resize((nw, nh), resample=Image.LANCZOS)
-
-    # 중앙 크롭
-    left = max(0, (nw - tw) // 2)
-    top = max(0, (nh - th) // 2)
-    right = left + tw
-    bottom = top + th
-    cropped = resized.crop((left, top, right, bottom))
-    return cropped
+# def _resize_cover(img: Image.Image, tw: int, th: int) -> Image.Image:
+#     # EXIF 회전을 반영
+#     img = ImageOps.exif_transpose(img)
+#     sw, sh = img.size
+#     if sw == 0 or sh == 0:
+#         return img
+#
+#     # 비율 유지 확대: 목표 해상도를 '덮도록' 스케일
+#     scale = max(tw / sw, th / sh)
+#     nw, nh = int(round(sw * scale)), int(round(sh * scale))
+#     resized = img.resize((nw, nh), resample=Image.LANCZOS)
+#
+#     # 중앙 크롭
+#     left = max(0, (nw - tw) // 2)
+#     top = max(0, (nh - th) // 2)
+#     right = left + tw
+#     bottom = top + th
+#     cropped = resized.crop((left, top, right, bottom))
+#     return cropped
 
 def _resize_image_inplace(path: Path, cfg: dict, plans: list[str], dry: bool) -> int:
     if path.suffix.lower() not in IMAGE_EXTS:
@@ -489,11 +489,6 @@ def _resize_contain_pad(img: Image.Image, tw: int, th: int, bg_hex: str) -> Imag
     canvas.paste(resized.convert("RGBA"), (left, top), resized.convert("RGBA") if resized.mode in ("RGBA","LA") else None)
     return canvas
 
-
-
-
-# -------------------------------------------------------------------------
-
 def _parse_perm_string(s: str) -> List[int]:
     # '3-1-2' -> [3,1,2]
     return [int(x.strip()) for x in s.split("-") if x.strip()]
@@ -511,6 +506,13 @@ def _choose_perm(base: List[int], mode: str, manual_str: str, rng: Optional[rand
         return rng.choice(perms)
     # manual
     return _parse_perm_string(manual_str)
+
+def _rotate(lst: List[int], k: int = 1) -> List[int]:
+    if not lst:
+        return lst
+    k %= len(lst)
+    return lst[k:] + lst[:k]
+
 
 class RearrangeJob:
     @staticmethod
@@ -581,23 +583,36 @@ class RearrangeJob:
         chosen_perms["ㄹ"] = _choose_perm([4,5,6], perm_mode, perm_r, rng)     # B(4,5,6)
 
         # Build mapping of slot index (1..12) -> source account dir
-        slot_to_src: Dict[int, Optional[Path]] = {}
+        slot_to_src_by_label = {"유미": {}, "상근": {}}
 
-        # ㄱ (A 1..3) -> slots 1..3
-        for idx, acct in enumerate(chosen_perms["ㄱ"]):
-            slot_to_src[SLOT_RANGES["ㄱ"][idx]] = A_accounts.get(acct)
+        a1 = chosen_perms["ㄱ"]  # A(1..3)
+        a2 = chosen_perms["ㄴ"]  # A(4..6)
+        b1 = chosen_perms["ㄷ"]  # B(1..3)
+        b2 = chosen_perms["ㄹ"]  # B(4..6)
 
-        # ㄴ (A 4..6) -> slots 4..6
-        for idx, acct in enumerate(chosen_perms["ㄴ"]):
-            slot_to_src[SLOT_RANGES["ㄴ"][idx]] = A_accounts.get(acct)
+        # A그룹(유미) 월 = A1 + B1  → slots 1..3, 4..6
+        for idx, acct in enumerate(a1):  # slots 1..3
+            slot_to_src_by_label["유미"][SLOT_RANGES["ㄱ"][idx]] = A_accounts.get(acct)
+        for idx, acct in enumerate(b1):  # slots 4..6
+            slot_to_src_by_label["유미"][SLOT_RANGES["ㄴ"][idx]] = B_accounts.get(acct)
 
-        # ㄷ (B 1..3) -> slots 7..9
-        for idx, acct in enumerate(chosen_perms["ㄷ"]):
-            slot_to_src[SLOT_RANGES["ㄷ"][idx]] = B_accounts.get(acct)
+        # A그룹(유미) 화 = A2 + B2  → slots 7..9, 10..12
+        for idx, acct in enumerate(a2):  # slots 7..9
+            slot_to_src_by_label["유미"][SLOT_RANGES["ㄷ"][idx]] = A_accounts.get(acct)
+        for idx, acct in enumerate(b2):  # slots 10..12
+            slot_to_src_by_label["유미"][SLOT_RANGES["ㄹ"][idx]] = B_accounts.get(acct)
 
-        # ㄹ (B 4..6) -> slots 10..12
-        for idx, acct in enumerate(chosen_perms["ㄹ"]):
-            slot_to_src[SLOT_RANGES["ㄹ"][idx]] = B_accounts.get(acct)
+        # B그룹(상근) 월 = B2 + A2  → slots 1..3, 4..6
+        for idx, acct in enumerate(b2):  # slots 1..3
+            slot_to_src_by_label["상근"][SLOT_RANGES["ㄱ"][idx]] = B_accounts.get(acct)
+        for idx, acct in enumerate(a2):  # slots 4..6
+            slot_to_src_by_label["상근"][SLOT_RANGES["ㄴ"][idx]] = A_accounts.get(acct)
+
+        # B그룹(상근) 화 = B1 + A1  → slots 7..9, 10..12
+        for idx, acct in enumerate(b1):  # slots 7..9
+            slot_to_src_by_label["상근"][SLOT_RANGES["ㄷ"][idx]] = B_accounts.get(acct)
+        for idx, acct in enumerate(a1):  # slots 10..12
+            slot_to_src_by_label["상근"][SLOT_RANGES["ㄹ"][idx]] = A_accounts.get(acct)
 
         # Total ops (rough): (12*5*2) + overhead
         total_ops = 10 + (12 * 5 * 2)
@@ -626,9 +641,14 @@ class RearrangeJob:
         plans.append(f"ㄹ (B4-6): {'-'.join(map(str, chosen_perms['ㄹ']))}  -> slots {SLOT_RANGES['ㄹ']}")
 
         # 슬롯 매핑 헤더
-        plans.append(_("==== SLOT → SOURCE ACCOUNT ===="))
+        plans.append(_("==== SLOT → SOURCE ACCOUNT (유미) ===="))
         for slot in range(1, 13):
-            src = slot_to_src.get(slot)
+            src = slot_to_src_by_label["유미"].get(slot)
+            plans.append(f"slot {slot:2d}  <-  {src if src else '(missing)'}")
+
+        plans.append(_("==== SLOT → SOURCE ACCOUNT (상근) ===="))
+        for slot in range(1, 13):
+            src = slot_to_src_by_label["상근"].get(slot)
             plans.append(f"slot {slot:2d}  <-  {src if src else '(missing)'}")
 
         # 오늘 요일 기반 day 라벨 만들기
@@ -757,22 +777,24 @@ class RearrangeJob:
 
         # Iterate labels and days
         for label in ["유미", "상근"]:
-            # A세트(기존 '월'): slots 1..6
-            day_key = "월"  # 시퀀스 룰은 그대로 사용
+            mapping = slot_to_src_by_label[label]
+
+            # A세트(슬롯 1..6)
+            day_key = "월"
             day_order = SEQ[day_key][label]
             for slot in range(1, 7):
                 if cancel_event.is_set(): return
-                src = slot_to_src.get(slot)
-                dest_parent = get_dest_parent(slot, label, day_label_a)  # ✅ 경로는 '오늘요일-A'
+                src = mapping.get(slot)  # ← 여기!
+                dest_parent = get_dest_parent(slot, label, day_label_a)
                 copy_account_posts(src, dest_parent, day_order, dry_run)
 
-            # B세트(기존 '화'): slots 7..12
-            day_key = "화"  # 시퀀스 룰은 그대로 사용
+            # B세트(슬롯 7..12)
+            day_key = "화"
             day_order = SEQ[day_key][label]
             for slot in range(7, 13):
                 if cancel_event.is_set(): return
-                src = slot_to_src.get(slot)
-                dest_parent = get_dest_parent(slot, label, day_label_b)  # ✅ 경로는 '오늘요일-B'
+                src = mapping.get(slot)  # ← 여기!
+                dest_parent = get_dest_parent(slot, label, day_label_b)
                 copy_account_posts(src, dest_parent, day_order, dry_run)
 
         context.setdefault("_ui_logs", []).extend(plans)
