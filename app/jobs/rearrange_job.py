@@ -56,15 +56,15 @@ def _rgba_from_hex(hex_color: str, alpha_pct: int) -> tuple[int,int,int,int]:
 
 def _calc_position(w: int, h: int, tw: int, th: int, preset: str, dx: int, dy: int) -> tuple[int,int]:
     # preset: top-left/top-right/bottom-left/bottom-right/center
-    if preset == "top-left":
+    if preset == "좌상단":
         x, y = 0 + dx, 0 + dy
-    elif preset == "top-right":
+    elif preset == "우상단":
         x, y = w - tw - dx, 0 + dy
-    elif preset == "bottom-left":
+    elif preset == "좌하단":
         x, y = 0 + dx, h - th - dy
-    elif preset == "bottom-right":
+    elif preset == "우하단":
         x, y = w - tw - dx, h - th - dy
-    else:  # center
+    else:  # 중앙
         x, y = (w - tw)//2 + dx, (h - th)//2 + dy
     return x, y
 
@@ -104,7 +104,7 @@ def _apply_text_watermark(img: Image.Image, wm: dict) -> Image.Image:
         tw, th = draw.multiline_textsize(text, font=font)
 
     x, y = _calc_position(W, H, tw, th,
-                          wm.get("position","bottom-right"),
+                          wm.get("position","우하단"),
                           int(wm.get("offset_x",16)),
                           int(wm.get("offset_y",16)))
 
@@ -408,9 +408,9 @@ def _resize_image_inplace(path: Path, cfg: dict, plans: list[str], dry: bool) ->
                 plans.append(f"[DRY][RSZ] {path.name} -> {tw}x{th} ({mode})")
                 return 1
 
-            if mode == "cover":
+            if mode == "자르기":
                 out = _resize_cover(im, tw, th)
-            else:  # contain
+            else:  # 맞추기
                 out = _resize_contain_pad(im, tw, th, bg_hex)
 
             # 파일 포맷 유지해서 저장

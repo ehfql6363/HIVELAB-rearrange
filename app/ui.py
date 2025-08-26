@@ -416,10 +416,10 @@ class AppUI:
 
             # 4) 위치 + 오프셋
             ttk.Label(wm_right, text=_("초기 위치")).grid(row=4, column=2, sticky="e", padx=6, pady=4)
-            self.params_widgets["wm_position"] = tk.StringVar(value="bottom-right")
+            self.params_widgets["wm_position"] = tk.StringVar(value="우하단")
             wm_pos_combo = ttk.Combobox(wm_right, state="readonly", width=12,
                                         textvariable=self.params_widgets["wm_position"],
-                                        values=["top-left", "top-right", "bottom-left", "bottom-right", "center"])
+                                        values=["좌상단", "우상단", "좌하단", "우하단", "중앙"])
             wm_pos_combo.grid(row=4, column=3, sticky="w", padx=6, pady=4)
 
             ttk.Label(wm_right, text=_("오프셋 X/Y(px)")).grid(row=5, column=0, sticky="w", padx=6, pady=4)
@@ -468,14 +468,14 @@ class AppUI:
 
             # 모드: 맞추기(패딩) / 채우기(자르기)
             ttk.Label(rz_right, text=_("모드")).grid(row=1, column=0, sticky="w", padx=6, pady=4)
-            self.params_widgets["rz_mode"] = tk.StringVar(value="contain")
+            self.params_widgets["rz_mode"] = tk.StringVar(value="맞추기")
             rz_mode_combo = ttk.Combobox(
                 rz_right, state="readonly", width=14,
                 textvariable=self.params_widgets["rz_mode"],
-                values=["contain", "cover"]  # contain=패딩, cover=자르기
+                values=["맞추기", "자르기"]  # contain=패딩, cover=자르기
             )
             rz_mode_combo.grid(row=1, column=1, sticky="w", padx=6, pady=4)
-            self._add_tooltip(rz_mode_combo, _("contain: 패딩으로 채워 잘리지 않음 / cover: 잘라서 꽉 채움"))
+            self._add_tooltip(rz_mode_combo, _("맞추기: 패딩으로 채워 잘리지 않음 / 자르기: 잘라서 꽉 채움"))
 
             # 목표 해상도
             ttk.Label(rz_right, text=_("목표 해상도")).grid(row=1, column=2, sticky="e", padx=6, pady=4)
