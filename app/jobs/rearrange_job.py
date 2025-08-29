@@ -683,7 +683,7 @@ class RearrangeJob:
             else:
                 if not ts.name:
                     raise ValueError(f"Target slot {slot_idx} requires a name or existing path.")
-                base = target_root / parent_name / day / ts.name
+                base = target_root / parent_name / day / f"{slot_idx}. {ts.name}"
             return base
 
         # copy helper (uses NORMALIZED posts)
