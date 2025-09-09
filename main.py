@@ -5,7 +5,7 @@ from app.security.license_gate import ensure_activated
 import sys
 
 
-APP_VERSION = "2.8"
+APP_VERSION = "1.1"
 
 def _license_gate_or_exit() -> bool:
     from app.security.license_gate import ensure_activated

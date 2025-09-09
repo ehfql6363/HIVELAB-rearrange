@@ -15,7 +15,7 @@ from app.security.fingerprint import compute_fingerprint
 from app.security.license import validate_license_text, save_license_to_disk
 from app.style.fluent import PrimaryPushButton, PushButton, InfoBar
 
-APP_VERSION = "1.2"  # 앱 버전과 맞춰 주세요
+APP_VERSION = "1.1"  # 앱 버전과 맞춰 주세요
 
 
 # ---------- 강력 디코더: 파일을 어떤 인코딩으로든 최대한 안전하게 텍스트로 ----------
