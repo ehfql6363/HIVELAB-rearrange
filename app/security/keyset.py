@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives import serialization
 # 검증이 통과하면 키셋에 포함된 "발급용 공개키"들을 반환
 
 ROOT_PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAlUtdOCgw+wHZ3+dAGYYXfMMd5anFPew/CqCcnDds200=
+MCowBQYDK2VwAyEAMt4lSRhCvstznXGxUhzyefOzECn7oYRCCYItTxxkKEA=
 -----END PUBLIC KEY-----"""
 
 KEYSET_FILENAME = "trusted_keyset.fsqpub"
