@@ -20,7 +20,7 @@ from app.security.keyset import load_trusted_pubkeys  # 서명된 키셋 로더
 # (선택) 임베디드 발급 공개키(들) — 없으면 빈 리스트로 둬도 됩니다.
 EMBEDDED_ISSUER_KEYS_PEM: List[bytes] = [
     b"""-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAj9pBGN8QHbz1tGId6VusBcyyCrj2XeX7DOya4WkMbCA=
+MCowBQYDK2VwAyEAPQLKPPXyv8973UdMIyD7DeVeMu3ZZdileGeH580lb40=
 -----END PUBLIC KEY-----"""
 ]
 
